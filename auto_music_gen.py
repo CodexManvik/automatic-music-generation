@@ -63,9 +63,9 @@ class MusicLSTM(nn.Module):
     def __init__(self, input_size: int, hidden_size: int = 256, num_classes: int = 100):
         super().__init__()
         self.lstm1 = nn.LSTM(input_size, hidden_size, batch_first=True)
-        self.dropout1 = nn.Dropout(0.2)
+        self.dropout1 = nn.Dropout(0.3)
         self.lstm2 = nn.LSTM(hidden_size, hidden_size, batch_first=True)
-        self.dropout2 = nn.Dropout(0.2)
+        self.dropout2 = nn.Dropout(0.3)
         self.dense1 = nn.Linear(hidden_size, 256)
         self.relu = nn.ReLU()
         self.dense2 = nn.Linear(256, num_classes)
@@ -159,12 +159,15 @@ print(model)
 
 # Loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
 
 # Training loop
-batch_size = 128
-epochs = 80
-num_batches = len(x_train_tensor) // batch_size
+batch_size = 768
+epochs = 500
+num_batches = max(1, len(x_train_tensor) // batch_size)
+best_val_loss = float("inf")
+patience = 50
+patience_counter = 0
 
 print(f"\nTraining for {epochs} epochs...")
 for epoch in range(epochs):
@@ -211,20 +214,33 @@ for epoch in range(epochs):
             val_total += batch_y.size(0)
             val_correct += (predicted == batch_y).sum().item()
     
+    train_acc = 100 * correct / max(1, total)
+    val_acc = 100 * val_correct / max(1, val_total)
+    avg_train_loss = train_loss / num_batches
+    val_batches = max(1, len(x_test_tensor) // batch_size)
+    avg_val_loss = val_loss / val_batches
+
+    # Model checkpointing
+    if avg_val_loss < best_val_loss:
+        best_val_loss = avg_val_loss
+        torch.save(model.state_dict(), "s2s/model.pth")
+        patience_counter = 0
+    else:
+        patience_counter += 1
+    
     if (epoch + 1) % 10 == 0:
-        train_acc = 100 * correct / total
-        val_acc = 100 * val_correct / val_total
-        avg_train_loss = train_loss / num_batches
-        avg_val_loss = val_loss / (len(x_test_tensor) // batch_size)
         print(
             f"Epoch [{epoch+1}/{epochs}], "
             f"Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.2f}%, "
             f"Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.2f}%"
         )
 
-# Save the model
-torch.save(model.state_dict(), "s2s/model.pth")
-print("\nModel saved to s2s/model.pth")
+    # Early stopping
+    if patience_counter >= patience:
+        print(f"\nEarly stopping at epoch {epoch+1}. Best Val Loss: {best_val_loss:.4f}")
+        break
+
+print("\nTraining completed! Best model was saved to s2s/model.pth")
 
 # Save mappings and test data for inference
 mappings = {
